@@ -93,6 +93,7 @@ class UnetAdaptiveBins(nn.Module):
         unet_out = self.decoder(self.encoder(x), **kwargs)
         bin_widths_normed, range_attention_maps = self.adaptive_bins_layer(unet_out)
         out = self.conv_out(range_attention_maps)
+        # return out  # export onnx
 
         # Post process
         # n, c, h, w = out.shape
@@ -122,7 +123,7 @@ class UnetAdaptiveBins(nn.Module):
     def build(cls, n_bins, **kwargs):
         basemodel_name = 'tf_efficientnet_b5_ap'
 
-        print('Loading base model ()...'.format(basemodel_name), end='')
+        print(f'Loading base model {basemodel_name}')
         basemodel = torch.hub.load('rwightman/gen-efficientnet-pytorch', basemodel_name, pretrained=True)
         print('Done.')
 
@@ -140,6 +141,15 @@ class UnetAdaptiveBins(nn.Module):
 
 if __name__ == '__main__':
     model = UnetAdaptiveBins.build(100)
-    x = torch.rand(2, 3, 480, 640)
+    x = torch.rand(1, 3, 480, 640)
     bins, pred = model(x)
+    with torch.no_grad():
+        torch.onnx.export(model,
+                          (x,),
+                          "model.onnx",
+                          input_names=["image"],
+                          output_names=["bins", "pred"],
+                          do_constant_folding=True,
+                          opset_version=11
+                          )
     print(bins.shape, pred.shape)

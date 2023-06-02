@@ -131,12 +131,12 @@ class InferenceHelper:
         pred = np.clip(pred.cpu().numpy(), self.min_depth, self.max_depth)
 
         # Flip
-        image = torch.Tensor(np.array(image.cpu().numpy())[..., ::-1].copy()).to(self.device)
-        pred_lr = self.model(image)[-1]
-        pred_lr = np.clip(pred_lr.cpu().numpy()[..., ::-1], self.min_depth, self.max_depth)
+        # image = torch.Tensor(np.array(image.cpu().numpy())[..., ::-1].copy()).to(self.device)
+        # pred_lr = self.model(image)[-1]
+        # pred_lr = np.clip(pred_lr.cpu().numpy()[..., ::-1], self.min_depth, self.max_depth)
 
         # Take average of original and mirror
-        final = 0.5 * (pred + pred_lr)
+        final = pred
         final = nn.functional.interpolate(torch.Tensor(final), image.shape[-2:],
                                           mode='bilinear', align_corners=True).cpu().numpy()
 
@@ -191,8 +191,8 @@ if __name__ == '__main__':
     img = Image.open("test_imgs/0001.jpg")
     start = time()
     inferHelper = InferenceHelper()
-    inferHelper.predict_dir("video/img/",
-                            "video/out/")
+    inferHelper.predict_dir("/media/ros/A666B94D66B91F4D/ros/learning/depth/AdaBins/video/img/",
+                            "/media/ros/A666B94D66B91F4D/ros/learning/depth/AdaBins/video/out3/")
     # centers, pred, vis = inferHelper.predict_pil(img)
 
     # vis.save()

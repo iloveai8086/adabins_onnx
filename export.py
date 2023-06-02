@@ -12,7 +12,8 @@ import matplotlib
 import model_io
 import utils
 from models import UnetAdaptiveBins
-
+import onnxsim
+import onnx
 
 def colorize(value, vmin=None, vmax=None, cmap='magma_r'):
     value = value[0, :, :]
@@ -35,6 +36,7 @@ def colorize(value, vmin=None, vmax=None, cmap='magma_r'):
 
     #     return img.transpose((2, 0, 1))
     return value
+
 
 def _is_pil_image(img):
     return isinstance(img, Image.Image)
@@ -127,16 +129,18 @@ class InferenceHelper:
     @torch.no_grad()
     def predict(self, image):
         bins, pred = self.model(image)
-        # return bins, pred
+        print(bins)
+        print(pred)
         pred = np.clip(pred.cpu().numpy(), self.min_depth, self.max_depth)
 
         # Flip
-        image = torch.Tensor(np.array(image.cpu().numpy())[..., ::-1].copy()).to(self.device)
-        pred_lr = self.model(image)[-1]
-        pred_lr = np.clip(pred_lr.cpu().numpy()[..., ::-1], self.min_depth, self.max_depth)
+        # image = torch.Tensor(np.array(image.cpu().numpy())[..., ::-1].copy()).to(self.device)  # 图反转后，再去传入，然后推理
+        # pred_lr = self.model(image)[-1]
+        # pred_lr = np.clip(pred_lr.cpu().numpy()[..., ::-1], self.min_depth, self.max_depth)
 
         # Take average of original and mirror
-        final = 0.5 * (pred + pred_lr)
+        # final = 0.5 * (pred + pred_lr)
+        final = pred
         final = nn.functional.interpolate(torch.Tensor(final), image.shape[-2:],
                                           mode='bilinear', align_corners=True).cpu().numpy()
 
@@ -151,10 +155,6 @@ class InferenceHelper:
         centers = centers[centers < self.max_depth]
 
         return centers, final
-
-
-
-
 
     @torch.no_grad()
     def predict_dir(self, test_dir, out_dir):
@@ -181,25 +181,41 @@ class InferenceHelper:
             Image.fromarray(img).save(save_path)
 
 
+class Model(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.min_depth = 1e-3
+        self.max_depth = 10
+        self.saving_factor = 1000  # used to save in 16 bit
+        self.model = UnetAdaptiveBins.build(n_bins=256, min_val=self.min_depth, max_val=self.max_depth)
+        pretrained_path = "./pretrained/AdaBins_nyu.pt"
+        self.model, _, _ = model_io.load_checkpoint(pretrained_path, self.model)
+
+    def forward(self, x):
+        bins, pred = self.model(image)
+        pred = torch.clip(pred, self.min_depth, self.max_depth)
+        centers = 0.5 * (bins[:, 1:] + bins[:, :-1]).squeeze()
+        final = nn.functional.interpolate(pred, image.shape[-2:],
+                                          mode='bilinear', align_corners=True)
+        return centers, final
+
 if __name__ == '__main__':
-    import matplotlib.pyplot as plt
-    from time import time
-    path = "video/img"
-    img_path = os.listdir()
+    transform = ToTensor()
+    image = np.asarray(Image.open("test_imgs/0001.jpg"), dtype='float32') / 255.
+    image = transform(image).unsqueeze(0).to("cuda:0")
 
+    model = Model().eval().cuda()
 
-    img = Image.open("test_imgs/0001.jpg")
-    start = time()
-    inferHelper = InferenceHelper()
-    inferHelper.predict_dir("video/img/",
-                            "video/out/")
-    # centers, pred, vis = inferHelper.predict_pil(img)
+    with torch.no_grad():
+        torch.onnx.export(model,
+                          (image,),
+                          "model.onnx",
+                          input_names=["image"],
+                          output_names=["centers", "final"],
+                          do_constant_folding=True,
+                          opset_version=13
+                          )
 
-    # vis.save()
-    # print(pred)
-    # print(pred.shape)
-    # print(pred.dtype)
-    # print(f"took :{time() - start}s")
-    # plt.imshow(pred.squeeze(), cmap='magma_r')
-    # plt.show()
-    # pred.save()
+    model_onnx = onnx.load("model.onnx")  # load onnx model
+    model_onnx, check = onnxsim.simplify(model_onnx)
+    onnx.save(model_onnx, "sim.onnx")

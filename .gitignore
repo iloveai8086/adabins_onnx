@@ -7,4 +7,6 @@ predictions_kitti/
 wandb/
 checkpoints/
 pretrained/
-
+*.onnx
+.idea
+video/
